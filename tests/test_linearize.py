@@ -30,6 +30,7 @@ def test_basic():
 
     assert np.all(u.data == u1.data)
 
+
 @skipif(['nompi'])
 @pytest.mark.parallel(mode=[(1, 'basic'), (1, 'diag2'), (1, 'full')])
 def test_mpi():

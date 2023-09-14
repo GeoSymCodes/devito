@@ -10,7 +10,7 @@ from examples.seismic import demo_model, setup_geometry, seismic_args, Receiver
 def viscoacoustic_setup(shape=(50, 50), spacing=(15.0, 15.0), tn=500., space_order=4,
                         nbl=40, preset='layers-viscoacoustic', kernel='sls',
                         src_type='ricker', time_order=2, **kwargs):
-# Dgauss
+    # Dgauss
     model = demo_model(preset, space_order=space_order, shape=shape, nbl=nbl,
                        dtype=kwargs.pop('dtype', np.float32), spacing=spacing)
 
