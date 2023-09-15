@@ -272,15 +272,15 @@ class C_Matrix():
 
     @staticmethod
     def _generate_DIp(model):
-        def d_Is(i, j):
+        def d_Ip(i, j):
             ii, jj = min(i, j), max(i, j)
             if (ii <= model.dim and jj <= model.dim):
                 return model.vp
             return 0
 
         d = model.dim*2 + model.dim-2
-        D_Is = [[d_Is(i, j) for i in range(1, d)] for j in range(1, d)]
-        return Matrix(D_Is)
+        D_Ip = [[d_Ip(i, j) for i in range(1, d)] for j in range(1, d)]
+        return Matrix(D_Ip)
 
     @staticmethod
     def _generate_DIs(model):
@@ -301,11 +301,11 @@ class C_Matrix():
                     'C33': vs,
                     'C12': -2*vs}
 
-        D_Ip = C_Matrix._matrix_init(model.dim)
+        D_Is = C_Matrix._matrix_init(model.dim)
         vs = model.vs
 
         subs = subs3D() if model.dim == 3 else subs2D()
-        return D_Ip.subs(subs)
+        return D_Is.subs(subs)
 
 
 def D(self, shift=None):
