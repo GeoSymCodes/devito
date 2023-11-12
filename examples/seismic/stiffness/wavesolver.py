@@ -240,9 +240,11 @@ class IsoElasticWaveSolver(object):
         kwargs.update(new_p)
 
         has_rec_p = True if kwargs.get('rec_p', None) else None
-        summary = self.op_grad(par=par, has_rec_p=has_rec_p).apply(rec_vx=rec_vx, rec_vz=rec_vz, grad1=grad1,
-                                                                   grad2=grad2, grad3=grad3,
-                                                                   dt=kwargs.pop('dt', self.dt), **kwargs)
+
+        op = self.op_grad(par=par, has_rec_p=has_rec_p)
+        summary = op.apply(rec_vx=rec_vx, rec_vz=rec_vz, grad1=grad1,
+                           grad2=grad2, grad3=grad3,
+                           dt=kwargs.pop('dt', self.dt), **kwargs)
 
         return grad1, grad2, grad3, summary
 
