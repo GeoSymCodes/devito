@@ -2,8 +2,41 @@ import sympy as sp
 import numpy as np
 
 from devito import (Eq, Operator, VectorTimeFunction, TimeFunction, Function, NODE,
-                    div, grad, solve)
+                    div, grad, solve, sign)
+from devito.symbolics import retrieve_functions, INT
 from examples.seismic import PointSource, Receiver
+
+
+def freesurface(model, eq, update):
+    """
+    Generate the stencil that mirrors the field as a free surface modeling for
+    the viscoacoustic wave equations.
+
+    Parameters
+    ----------
+    model : Model
+        Physical model.
+    eq : Eq
+        Time-stepping stencil (time update) to mirror at the freesurface.
+    update : str
+        The field being updated: 'pressure' or 'velocity'
+    """
+    lhs, rhs = eq.evaluate.args
+    # Get vertical dimension and corresponding subdimension
+    zfs = model.grid.subdomains['fsdomain'].dimensions[-1]
+    z = zfs.parent
+
+    # Functions present in the stencil
+    funcs = retrieve_functions(rhs)
+    mapper = {}
+    # Antisymmetric mirror at negative indices
+    # TODO: Make a proper "mirror_indices" tool function
+    for f in funcs:
+        zind = f.indices[-1]
+        if (zind - z).as_coeff_Mul()[0] < 0:
+            s = sign(zind.subs({z: zfs, z.spacing: 1})) if update == 'velocity' else 1
+            mapper.update({f: s * f.subs({zind: INT(abs(zind))})})
+    return Eq(lhs, rhs.subs(mapper), subdomain=model.grid.subdomains['fsdomain'])
 
 
 def src_rec(p, model, geometry, **kwargs):
@@ -91,17 +124,25 @@ def sls_1st_order(model, geometry, p, r=None, **kwargs):
 
         # Particle velocity
         pde_v = v.dt + b * grad(p)
-        u_v = Eq(v.forward, damp * solve(pde_v, v.forward))
+        eq_vtime = damp * solve(pde_v, v.forward)
+        eq = [Eq(v.forward, eq_vtime, subdomain=model.grid.subdomains['physdomain'])]
 
         # Attenuation Memory variable
         pde_r = r.dt + (1. / t_s) * (r + tt * rho * div(v.forward))
-        u_r = Eq(r.forward, damp * solve(pde_r, r.forward))
+        eq_rtime = damp * solve(pde_r, r.forward)
+        eq.append(Eq(r.forward, eq_rtime, subdomain=model.grid.subdomains['physdomain']))
 
         # Pressure
         pde_p = m * p.dt + rho * (tt + 1.) * div(v.forward) + r.forward - q
-        u_p = Eq(p.forward, damp * solve(pde_p, p.forward))
+        eq_ptime = damp * solve(pde_p, p.forward)
+        eq.append(Eq(p.forward, eq_ptime, subdomain=model.grid.subdomains['physdomain']))
 
-        return [u_v, u_r, u_p]
+        # Add free surface
+        if model.fs:
+            eq.insert(-1, freesurface(model, Eq(p.forward, eq_ptime), 'pressure'))
+            eq.insert(1, freesurface(model, Eq(v.forward, eq_vtime), 'velocity'))
+
+        return eq
 
     else:
 
@@ -229,14 +270,21 @@ def kv_1st_order(model, geometry, p, **kwargs):
     if forward:
         # Particle velocity
         pde_v = v.dt + b * grad(p)
-        u_v = Eq(v.forward, damp * solve(pde_v, v.forward))
+        eq_vtime = damp * solve(pde_v, v.forward)
+        eq = [Eq(v.forward, eq_vtime, subdomain=model.grid.subdomains['physdomain'])]
 
         # Pressure
         pde_p = m * p.dt + rho * div(v.forward) - \
             tau * rho * div(b * grad(p, shift=.5), shift=-.5)
-        u_p = Eq(p.forward, damp * solve(pde_p, p.forward))
+        eq_ptime = damp * solve(pde_p, p.forward)
+        eq.append(Eq(p.forward, eq_ptime, subdomain=model.grid.subdomains['physdomain']))
 
-        return [u_v, u_p]
+        # Add free surface
+        if model.fs:
+            eq.insert(-1, freesurface(model, Eq(p.forward, eq_ptime), 'pressure'))
+            eq.insert(1, freesurface(model, Eq(v.forward, eq_vtime), 'velocity'))
+
+        return eq
     else:
         # Particle velocity
         # Becaue v is a Vector, `.T` applies a standard matrix transpose
@@ -339,12 +387,19 @@ def maxwell_1st_order(model, geometry, p, **kwargs):
     if forward:
         # Particle velocity
         pde_v = v.dt + b * grad(p)
-        u_v = Eq(v.forward, damp * solve(pde_v, v.forward))
+        eq_vtime = damp * solve(pde_v, v.forward)
+        eq = [Eq(v.forward, eq_vtime, subdomain=model.grid.subdomains['physdomain'])]
         # Pressure
         pde_p = m * p.dt + rho * div(v.forward) + (w0 / qp) * p
-        u_p = Eq(p.forward, damp * solve(pde_p, p.forward))
+        eq_ptime = damp * solve(pde_p, p.forward)
+        eq.append(Eq(p.forward, eq_ptime, subdomain=model.grid.subdomains['physdomain']))
 
-        return [u_v, u_p]
+        # Add free surface
+        if model.fs:
+            eq.insert(-1, freesurface(model, Eq(p.forward, eq_ptime), 'pressure'))
+            eq.insert(1, freesurface(model, Eq(v.forward, eq_vtime), 'velocity'))
+
+        return eq
 
     else:
         # Particle velocity
