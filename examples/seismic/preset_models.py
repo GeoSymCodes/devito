@@ -99,7 +99,7 @@ def demo_model(preset, **kwargs):
         b = 1/2.
 
         return SeismicModel(space_order=space_order, vp=vp, qp=qp, b=b, nbl=nbl,
-                            dtype=dtype, origin=origin, shape=shape,
+                            dtype=dtype, origin=origin, shape=shape, fs=fs,
                             spacing=spacing, **kwargs)
 
     elif preset.lower() in ['constant-tti', 'constant-tti-noazimuth']:
@@ -371,7 +371,7 @@ def demo_model(preset, **kwargs):
         b = Gardners(vp, normalize=False)
 
         return SeismicModel(space_order=space_order, vp=vp, qp=qp, b=b, nbl=nbl,
-                            dtype=dtype, origin=origin, shape=shape,
+                            dtype=dtype, origin=origin, shape=shape, fs=fs,
                             spacing=spacing, **kwargs)
 
     else:
