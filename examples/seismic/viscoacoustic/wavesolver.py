@@ -1,5 +1,5 @@
 from devito import (VectorTimeFunction, TimeFunction, Function, NODE,
-                    DevitoCheckpoint, CheckpointOperator, Revolver)
+                    DevitoCheckpoint, CheckpointOperator, Revolver, warning)
 from devito.tools import memoized_meth
 from examples.seismic import PointSource
 from examples.seismic.viscoacoustic.operators import (
@@ -41,6 +41,11 @@ class ViscoacousticWaveSolver(object):
         self.kernel = kernel
         self.time_order = time_order
         self._kwargs = kwargs
+
+        if model.fs and time_order == 2:
+            warning("Bad arguments in ViscoacousticWaveSolver() - " +
+                    "if model.fs is True, time_order should be 1")
+            self.time_order = 1
 
     @property
     def dt(self):

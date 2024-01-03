@@ -64,7 +64,7 @@ class PhysicalDomain(SubDomain):
     def define(self, dimensions):
         map_d = {d: d for d in dimensions}
         if self.fs:
-            map_d[dimensions[-1]] = ('middle', self.so, 0)
+            map_d[dimensions[-1]] = ('middle', self.so//2, 0)
         return map_d
 
 
@@ -74,7 +74,7 @@ class FSDomain(SubDomain):
 
     def __init__(self, so):
         super(FSDomain, self).__init__()
-        self.size = so
+        self.size = so//2
 
     def define(self, dimensions):
         """
@@ -305,7 +305,6 @@ class SeismicModel(GenericModel):
             self.lam = self._gen_phys_param((vp**2 - 2. * vs**2)/b, 'lam', space_order,
                                             is_param=True)
             self.mu = self._gen_phys_param(vs**2 / b, 'mu', space_order, is_param=True)
-
         else:
             # All other seismic models have at least a velocity
             self.vp = self._gen_phys_param(vp, 'vp', space_order)
