@@ -71,7 +71,8 @@ class AcousticWaveSolver(object):
                             kernel=self.kernel, space_order=self.space_order,
                             **self._kwargs)
 
-    def forward(self, src=None, rec=None, u=None, model=None, save=None, vp=None, **kwargs):
+    def forward(self, src=None, rec=None, u=None, model=None, save=None,
+                vp=None, **kwargs):
         """
         Forward modelling function that creates the necessary
         data objects for running a forward modelling operator.
