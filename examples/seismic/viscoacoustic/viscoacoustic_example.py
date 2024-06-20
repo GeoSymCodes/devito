@@ -9,9 +9,10 @@ from examples.seismic import demo_model, setup_geometry, seismic_args
 
 def viscoacoustic_setup(shape=(50, 50), spacing=(15.0, 15.0), tn=500., space_order=4,
                         nbl=40, preset='layers-viscoacoustic', kernel='sls',
-                        time_order=2, **kwargs):
+                        time_order=2, fs=False, **kwargs):
     model = demo_model(preset, space_order=space_order, shape=shape, nbl=nbl,
-                       dtype=kwargs.pop('dtype', np.float32), spacing=spacing)
+                       dtype=kwargs.pop('dtype', np.float32), spacing=spacing,
+                       fs=fs, **kwargs)
 
     # Source and receiver geometries
     geometry = setup_geometry(model, tn)
@@ -24,10 +25,10 @@ def viscoacoustic_setup(shape=(50, 50), spacing=(15.0, 15.0), tn=500., space_ord
 
 def run(shape=(50, 50), spacing=(20.0, 20.0), tn=1000.0,
         space_order=4, nbl=40, autotune=False, preset='layers-viscoacoustic',
-        kernel='sls', time_order=2, **kwargs):
+        kernel='sls', time_order=2, fs=False, **kwargs):
 
     solver = viscoacoustic_setup(shape=shape, spacing=spacing, nbl=nbl, tn=tn,
-                                 space_order=space_order, preset=preset,
+                                 space_order=space_order, preset=preset, fs=fs,
                                  kernel=kernel, time_order=time_order, **kwargs)
     info("Applying Forward")
 
@@ -62,6 +63,8 @@ def test_viscoacoustic_stability(shape, kernel, time_order):
 if __name__ == "__main__":
     description = ("Example script for a set of viscoacoustic operators.")
     parser = seismic_args(description)
+    parser.add_argument('--fs', dest='fs', default=False, action='store_true',
+                        help="Whether or not to use a freesurface")
     parser.add_argument("-k", dest="kernel", default='sls',
                         choices=['sls', 'kv', 'maxwell'],
                         help="Choice of finite-difference kernel")
@@ -77,4 +80,4 @@ if __name__ == "__main__":
 
     run(shape=shape, spacing=spacing, nbl=args.nbl, tn=tn, opt=args.opt,
         space_order=args.space_order, autotune=args.autotune, preset=preset,
-        kernel=args.kernel, time_order=args.time_order)
+        fs=args.fs, kernel=args.kernel, time_order=args.time_order)
