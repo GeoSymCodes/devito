@@ -282,10 +282,14 @@ def get_ooc_config(func, mode, **kwargs):
     else:
         cc = False
 
-    if not kwargs.get("dswap_path"):
-        dswap_path = create_ds_path(kwargs["dswap_folder"], kwargs["dswap_folder_path"])
-        kwargs["dswap_path"] = dswap_path
 
-    dskswap_config = DiskSwapConfig(functions=func, mode=mode, compression=cc, path=kwargs.get("dswap_path"), verbose=kwargs.get("dswap_verbose"))
+    dskswap_config = DiskSwapConfig(
+        functions=func,
+        mode=mode,
+        compression=cc,
+        path=kwargs.get("dswap_path"),
+        folder=kwargs.get("dswap_folder"),
+        verbose=kwargs.get("dswap_verbose")
+    )
 
     return {'opt': ('advanced', {'disk-swap': dskswap_config})}
