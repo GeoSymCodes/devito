@@ -1,12 +1,12 @@
-from devito import (VectorTimeFunction, TimeFunction, Function, NODE,
-                    DevitoCheckpoint, CheckpointOperator, Revolver)
+from devito import VectorTimeFunction, TimeFunction, Function, NODE
 from devito.tools import memoized_meth
-from examples.seismic.viscoacoustic.operators import (
-    ForwardOperator, AdjointOperator, GradientOperator, BornOperator
+from examples.seismic import PointSource
+from examples.seismic.multiparameter.viscoacoustic.operators import (
+    ForwardOperator, AdjointOperator, NoAdjointOperator, GradientOperator, BornOperator
 )
 
 
-class ViscoacousticWaveSolver:
+class ViscoacousticWaveSolver(object):
     """
     Solver object that provides operators for seismic inversion problems
     and encapsulates the time and space discretization for a given problem
@@ -26,8 +26,8 @@ class ViscoacousticWaveSolver:
                 1st order - Blanch and Symes (1995) / Dutta and Schuster (2014)
                 viscoacoustic equation
                 2nd order - Bai et al. (2014) viscoacoustic equation
-                'kv' - Ren et al. (2014) viscoacoustic equation
-                'maxwell' - Deng and McMechan (2007) viscoacoustic equation
+                'ren' - Ren et al. (2014) viscoacoustic equation
+                'deng_mcmechan' - Deng and McMechan (2007) viscoacoustic equation
                 Defaults to 'sls' 2nd order.
     """
     def __init__(self, model, geometry, space_order=4, kernel='sls', time_order=2,
@@ -58,6 +58,13 @@ class ViscoacousticWaveSolver:
         return AdjointOperator(self.model, save=None, geometry=self.geometry,
                                space_order=self.space_order, kernel=self.kernel,
                                time_order=self.time_order, **self._kwargs)
+
+    @memoized_meth
+    def op_noadj(self):
+        """Cached operator for adjoint runs"""
+        return NoAdjointOperator(self.model, save=None, geometry=self.geometry,
+                                 space_order=self.space_order, kernel=self.kernel,
+                                 time_order=self.time_order, **self._kwargs)
 
     @memoized_meth
     def op_grad(self, save=True):
@@ -140,12 +147,25 @@ class ViscoacousticWaveSolver:
             # With Memory variable
             summary = self.op_fwd(save).apply(src=src, rec=rec, r=r, p=p,
                                               dt=kwargs.pop('dt', self.dt), **kwargs)
+            if self.time_order == 1:
+                return rec, p, v, r, summary
+            else:
+                return rec, p, r, summary
+
+        elif self.kernel == 'acoustic':
+            kwargs.pop('qp', None)
+            summary = self.op_fwd(save).apply(src=src, rec=rec, p=p,
+                                              dt=kwargs.pop('dt', self.dt), **kwargs)
         else:
             # Execute operator and return wavefield and receiver data
             # Without Memory variable
             summary = self.op_fwd(save).apply(src=src, rec=rec, p=p,
                                               dt=kwargs.pop('dt', self.dt), **kwargs)
-        return rec, p, v, summary
+
+        if self.time_order == 1:
+            return rec, p, v, summary
+        else:
+            return rec, p, summary
 
     def adjoint(self, rec, srca=None, va=None, pa=None, r=None, model=None, **kwargs):
         """
@@ -180,7 +200,9 @@ class ViscoacousticWaveSolver:
         Adjoint source, wavefield and performance summary.
         """
         # Create a new adjoint source and receiver symbol
-        srca = srca or self.geometry.new_src(name='srca', src_type=None)
+        srca = srca or PointSource(name='srca', grid=self.model.grid,
+                                   time_range=self.geometry.time_axis,
+                                   coordinates=self.geometry.src_positions)
 
         if self.time_order == 1:
             va = va or VectorTimeFunction(name="va", grid=self.model.grid,
@@ -207,13 +229,64 @@ class ViscoacousticWaveSolver:
             # With Memory variable
             summary = self.op_adj().apply(src=srca, rec=rec, pa=pa, r=r,
                                           dt=kwargs.pop('dt', self.dt), **kwargs)
+        elif self.kernel == 'acoustic':
+            kwargs.pop('qp', None)
+            summary = self.op_adj().apply(src=srca, rec=rec, pa=pa,
+                                          dt=kwargs.pop('dt', self.dt), **kwargs)
         else:
             summary = self.op_adj().apply(src=srca, rec=rec, pa=pa,
                                           dt=kwargs.pop('dt', self.dt), **kwargs)
-        return srca, pa, va, summary
+        return srca, pa, summary
 
-    def jacobian_adjoint(self, rec, p, pa=None, grad=None, r=None, va=None, model=None,
-                         checkpointing=False, **kwargs):
+    def noadjoint(self, rec, srca=None, va=None, pa=None, model=None, **kwargs):
+        """
+        Adjoint modelling function that creates the necessary
+        data objects for running an adjoint modelling operator.
+
+        Parameters
+        ----------
+        rec : SparseTimeFunction or array-like
+            The receiver data. Please note that
+            these act as the source term in the adjoint run.
+        srca : SparseTimeFunction or array-like
+            The resulting data for the interpolated at the
+            original source location.
+        pa: TimeFunction, optional
+            The computed wavefield.
+        model : Model, optional
+            Object containing the physical parameters.
+
+        Returns
+        -------
+        Adjoint source, wavefield and performance summary.
+        """
+        # Create a new adjoint source and receiver symbol
+        srca = srca or PointSource(name='srca', grid=self.model.grid,
+                                   time_range=self.geometry.time_axis,
+                                   coordinates=self.geometry.src_positions)
+
+        if self.time_order == 1:
+            va = va or VectorTimeFunction(name="va", grid=self.model.grid,
+                                          time_order=self.time_order,
+                                          space_order=self.space_order)
+            kwargs.update({k.name: k for k in va})
+
+        pa = pa or TimeFunction(name="pa", grid=self.model.grid,
+                                time_order=self.time_order, space_order=self.space_order,
+                                staggered=NODE)
+
+        model = model or self.model
+        # Pick vp and physical parameters from model unless explicitly provided
+        kwargs.update(model.physical_params(**kwargs))
+
+        # Execute operator and return wavefield and receiver data
+        summary = self.op_noadj().apply(src=srca, rec=rec, pa=pa,
+                                        dt=kwargs.pop('dt', self.dt), **kwargs)
+        return srca, pa, summary
+
+    def jacobian_adjoint(self, rec, p, v=None, pa=None, grad_m=None,
+                         grad_tau=None, r=None, va=None,
+                         model=None, checkpointing=False, **kwargs):
         """
         Gradient modelling function for computing the adjoint of the
         Linearized Born modelling function, ie. the action of the
@@ -248,7 +321,8 @@ class ViscoacousticWaveSolver:
         """
         dt = kwargs.pop('dt', self.dt)
         # Gradient symbol
-        grad = grad or Function(name='grad', grid=self.model.grid)
+        grad_m = grad_m or Function(name='grad_m', grid=self.model.grid)
+        grad_tau = grad_tau or Function(name='grad_tau', grid=self.model.grid)
 
         # Create the forward wavefield
         pa = pa or TimeFunction(name='pa', grid=self.model.grid,
@@ -266,63 +340,107 @@ class ViscoacousticWaveSolver:
                                        space_order=self.space_order)
                 kwargs.update({k.name: k for k in v})
 
-            p = TimeFunction(name='p', grid=self.model.grid,
-                             time_order=self.time_order, space_order=self.space_order,
-                             staggered=NODE)
+            # p = TimeFunction(name='p', grid=self.model.grid,
+            #                  time_order=self.time_order, space_order=self.space_order,
+            #                  staggered=NODE)
 
-            r = TimeFunction(name="r", grid=self.model.grid, time_order=self.time_order,
-                             space_order=self.space_order, staggered=NODE)
+            # if self.kernel == 'sls':
 
-            l = [p, r] + v.values() if self.time_order == 1 else [p, r]
-            cp = DevitoCheckpoint(l)
-            n_checkpoints = None
-            wrap_fw = CheckpointOperator(self.op_fwd(save=False),
-                                         src=self.geometry.src, p=p, r=r, dt=dt, **kwargs)
+            #     r = TimeFunction(name="r", grid=self.model.grid,
+            #                      time_order=self.time_order,
+            #                      space_order=self.space_order, staggered=NODE)
 
-            ra = TimeFunction(name="ra", grid=self.model.grid, time_order=self.time_order,
-                              space_order=self.space_order, staggered=NODE)
+            #     l = [p, r] + v.values() if self.time_order == 1 else [p, r]
+            #     cp = DevitoCheckpoint(l)
+            #     n_checkpoints = None
+            #     wrap_fw = CheckpointOperator(self.op_fwd(save=False),
+            #                                  src=self.geometry.src, p=p, r=r, dt=dt,
+            #                                  **kwargs)
+            # else:
+            #     l = [p] + v.values() if self.time_order == 1 else [p]
+            #     cp = DevitoCheckpoint(l)
+            #     n_checkpoints = None
+            #     wrap_fw = CheckpointOperator(self.op_fwd(save=False),
+            #                                  src=self.geometry.src, p=p,
+            #                                  dt=dt, **kwargs)
 
-            if self.time_order == 1:
-                for i in {k.name: k for k in v}.keys():
-                    kwargs.pop(i)
-                va = VectorTimeFunction(name="va", grid=self.model.grid,
-                                        time_order=self.time_order,
-                                        space_order=self.space_order)
-                kwargs.update({k.name: k for k in va})
-                kwargs['time_m'] = 0
+            # if self.kernel == 'sls':
 
-            wrap_rev = CheckpointOperator(self.op_grad(save=False), p=p, pa=pa, r=ra,
-                                          rec=rec, dt=dt, grad=grad, **kwargs)
+            #     ra = TimeFunction(name="ra", grid=self.model.grid,
+            #                       time_order=self.time_order,
+            #                       space_order=self.space_order, staggered=NODE)
 
-            # Run forward
-            wrp = Revolver(cp, wrap_fw, wrap_rev, n_checkpoints,
-                           rec.data.shape[0] - (1 if self.time_order == 1 else 2))
-            wrp.apply_forward()
-            summary = wrp.apply_reverse()
+            #     if self.time_order == 1:
+            #         for i in {k.name: k for k in v}.keys():
+            #             kwargs.pop(i)
+            #         va = VectorTimeFunction(name="va", grid=self.model.grid,
+            #                                 time_order=self.time_order,
+            #                                 space_order=self.space_order)
+            #         kwargs.update({k.name: k for k in va})
+            #         kwargs['time_m'] = 0
+
+            #     wrap_rev = CheckpointOperator(self.op_grad(save=False), p=p,
+            #                                   pa=pa, r=ra,
+            #                                   rec=rec, dt=dt, grad=grad, **kwargs)
+            # else:
+            #     l = [p] + v.values() if self.time_order == 1 else [p]
+            #     cp = DevitoCheckpoint(l)
+            #     n_checkpoints = None
+            #     if self.kernel == 'acoustic':
+            #         kwargs.pop('qp', None)
+
+            #     if self.time_order == 1:
+            #         for i in {k.name: k for k in v}.keys():
+            #             kwargs.pop(i)
+            #         va = VectorTimeFunction(name="va", grid=self.model.grid,
+            #                                 time_order=self.time_order,
+            #                                 space_order=self.space_order)
+            #         kwargs.update({k.name: k for k in va})
+            #         kwargs['time_m'] = 0
+
+            #     wrap_rev = CheckpointOperator(self.op_grad(save=False), p=p, pa=pa,
+            #                                   rec=rec, dt=dt, grad=grad, **kwargs)
+
+            # # Run forward
+            # wrp = Revolver(cp, wrap_fw, wrap_rev, n_checkpoints,
+            #                rec.data.shape[0] - (1 if self.time_order == 1 else 2))
+            # wrp.apply_forward()
+            # summary = wrp.apply_reverse()
         else:
             if self.time_order == 1:
                 va = va or VectorTimeFunction(name="va", grid=self.model.grid,
                                               time_order=self.time_order,
                                               space_order=self.space_order)
                 kwargs.update({k.name: k for k in va})
+
+                save_t = rec.nt
+                v = v or VectorTimeFunction(name="v", grid=self.model.grid, save=save_t,
+                                            time_order=self.time_order,
+                                            space_order=self.space_order)
+                kwargs.update({k.name: k for k in v})
                 kwargs['time_m'] = 0
 
             if self.kernel == 'sls':
                 # Memory variable:
                 r = r or TimeFunction(name="r", grid=self.model.grid,
-                                    time_order=self.time_order,
-                                    space_order=self.space_order, staggered=NODE)
+                                      time_order=self.time_order,
+                                      space_order=self.space_order, staggered=NODE)
 
-                summary = self.op_grad().apply(rec=rec, grad=grad, pa=pa, p=p, r=r, dt=dt,
-                                            **kwargs)
-            else:
-                summary = self.op_grad().apply(rec=rec, grad=grad, pa=pa, p=p, dt=dt,
-                                            **kwargs)
+                summary = self.op_grad().apply(rec=rec, grad_m=grad_m,
+                                               grad_tau=grad_tau,
+                                               pa=pa, p=p, r=r, dt=dt,
+                                               **kwargs)
+            # elif self.kernel == 'acoustic':
+            #     kwargs.pop('qp', None)
+            #     summary = self.op_grad().apply(rec=rec, grad=grad, pa=pa, p=p, dt=dt,
+            #                                    **kwargs)
+            # else:
+            #     summary = self.op_grad().apply(rec=rec, grad=grad, pa=pa, p=p, dt=dt,
+            #                                    **kwargs)
+        return grad_m, grad_tau, summary
 
-        return grad, summary
-
-    def jacobian(self, dmin, src=None, rec=None, p=None, P=None, rp=None, rP=None, v=None,
-                 dv=None, model=None, **kwargs):
+    def jacobian(self, dm=None, dtau=None, drho=None, src=None, rec=None, p=None,
+                 P=None, rp=None, rP=None, v=None, dv=None, model=None, **kwargs):
         """
         Linearized Born modelling function that creates the necessary
         data objects for running an adjoint modelling operator.
@@ -367,6 +485,11 @@ class ViscoacousticWaveSolver:
                               time_order=self.time_order, space_order=self.space_order,
                               staggered=NODE)
 
+        if dm is None:
+            dm = Function(name='dm', grid=self.model.grid, space_order=0)
+        if dtau is None:
+            dtau = Function(name='dtau', grid=self.model.grid, space_order=0)
+
         # Memory variable:
         rp = rp or TimeFunction(name='rp', grid=self.model.grid,
                                 time_order=self.time_order,
@@ -392,7 +515,17 @@ class ViscoacousticWaveSolver:
         kwargs.update(model.physical_params(**kwargs))
 
         # Execute operator and return wavefield and receiver data
-        summary = self.op_born().apply(dm=dmin, p=p, P=P, src=src, rec=rec, rp=rp, rP=rP,
-                                       dt=kwargs.pop('dt', self.dt), **kwargs)
+        if self.kernel == 'sls':
+            summary = self.op_born().apply(dm=dm, dtau=dtau, p=p,
+                                           P=P, src=src, rec=rec, rp=rp, rP=rP,
+                                           dt=kwargs.pop('dt', self.dt),
+                                           **kwargs)
+        elif self.kernel == 'acoustic':
+            kwargs.pop('qp', None)
+            summary = self.op_born().apply(dm=dm, p=p, P=P, src=src, rec=rec,
+                                           dt=kwargs.pop('dt', self.dt), **kwargs)
+        else:
+            summary = self.op_born().apply(dm=dm, p=p, P=P, src=src, rec=rec,
+                                           dt=kwargs.pop('dt', self.dt), **kwargs)
 
         return rec, p, P, summary
